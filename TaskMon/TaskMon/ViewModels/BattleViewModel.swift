@@ -22,8 +22,10 @@ class BattleViewModel: ObservableObject {
     @Published var shakePlayer2: Bool = false
     @Published var isOnlineBattle: Bool = false
     @Published var waitingForOpponent: Bool = false
+    @Published var turnSecondsRemaining: Int = 30
 
     private var matchmakingTimer: Timer?
+    private var turnTimer: Timer?
     private var queueObserverHandle: Any?
     private var battleObserverHandle: Any?
     private var matchProcessed = false
@@ -35,6 +37,8 @@ class BattleViewModel: ObservableObject {
 
     private let battleService = ServiceContainer.shared.realtimeBattle
     private let authService = ServiceContainer.shared.auth
+
+    static let turnTimeLimit = 30
 
     enum BattlePhase {
         case setup
@@ -61,6 +65,48 @@ class BattleViewModel: ObservableObject {
         selectedTeam.contains(where: { $0.id == creature.id })
     }
 
+    // MARK: - Turn Timer
+
+    private func startTurnTimer() {
+        turnTimer?.invalidate()
+        turnSecondsRemaining = Self.turnTimeLimit
+
+        turnTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            DispatchQueue.main.async {
+                self.turnSecondsRemaining -= 1
+                if self.turnSecondsRemaining <= 0 {
+                    self.turnTimer?.invalidate()
+                    self.turnTimer = nil
+                    self.handleTurnTimeout()
+                }
+            }
+        }
+    }
+
+    private func stopTurnTimer() {
+        turnTimer?.invalidate()
+        turnTimer = nil
+    }
+
+    private func handleTurnTimeout() {
+        guard let battle = currentBattle, !battle.isOver else { return }
+
+        if isOnlineBattle {
+            // Only auto-submit if it's our turn
+            if isPlayerTurn {
+                let creature = battle.player1Active
+                let randomMove = Int.random(in: 0..<max(1, creature.moves.count))
+                playerSelectMove(randomMove)
+            }
+        } else {
+            // Local: it's always our turn when timer runs, auto-pick random move
+            let creature = battle.player1Active
+            let randomMove = Int.random(in: 0..<max(1, creature.moves.count))
+            playerSelectMove(randomMove)
+        }
+    }
+
     // MARK: - Local Battle
 
     func startLocalBattle() {
@@ -79,6 +125,7 @@ class BattleViewModel: ObservableObject {
         battlePhase = .fighting
         isPlayerTurn = true
         lastLogMessages = battle.battleLog
+        startTurnTimer()
     }
 
     // MARK: - Player Actions
@@ -89,7 +136,7 @@ class BattleViewModel: ObservableObject {
         if isOnlineBattle {
             submitOnlineAction(.useMove(moveIndex))
         } else {
-            resolveLocalTurn(playerAction: .useMove(moveIndex))
+            resolveLocalAction(playerAction: .useMove(moveIndex))
         }
     }
 
@@ -99,7 +146,7 @@ class BattleViewModel: ObservableObject {
         if isOnlineBattle {
             submitOnlineAction(.switchCreature(index))
         } else {
-            resolveLocalTurn(playerAction: .switchCreature(index))
+            resolveLocalAction(playerAction: .switchCreature(index))
         }
     }
 
@@ -117,19 +164,21 @@ class BattleViewModel: ObservableObject {
             battlePhase = .finished
             playerWon = false
             showBattleResult = true
+            stopTurnTimer()
         }
     }
 
-    // MARK: - Local Turn Resolution
+    // MARK: - Local Turn Resolution (Alternating)
 
-    private func resolveLocalTurn(playerAction: BattleAction) {
+    private func resolveLocalAction(playerAction: BattleAction) {
         guard var battle = currentBattle else { return }
 
         isPlayerTurn = false
+        stopTurnTimer()
 
-        let aiAction = BattleEngine.selectAIAction(battle: battle)
+        // Resolve player's action
         let oldLog = battle.battleLog.count
-        BattleEngine.resolveTurn(battle: &battle, player1Action: playerAction, player2Action: aiAction)
+        BattleEngine.executeAction(battle: &battle, action: playerAction)
 
         let newMessages = Array(battle.battleLog.dropFirst(oldLog))
         currentBattle = battle
@@ -140,7 +189,33 @@ class BattleViewModel: ObservableObject {
                 self.playerWon = battle.winnerId == self.playerId
                 self.showBattleResult = true
             } else {
+                // AI's turn — auto-execute after a short delay
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    self.resolveAITurn()
+                }
+            }
+        }
+    }
+
+    private func resolveAITurn() {
+        guard var battle = currentBattle, !battle.isOver else { return }
+
+        let aiAction = BattleEngine.selectAIAction(battle: battle)
+        let oldLog = battle.battleLog.count
+        BattleEngine.executeAction(battle: &battle, action: aiAction)
+
+        let newMessages = Array(battle.battleLog.dropFirst(oldLog))
+        currentBattle = battle
+
+        animateLogMessages(newMessages) {
+            if battle.isOver {
+                self.battlePhase = .finished
+                self.playerWon = battle.winnerId == self.playerId
+                self.showBattleResult = true
+            } else {
+                // Back to player's turn
                 self.isPlayerTurn = true
+                self.startTurnTimer()
             }
         }
     }
@@ -152,13 +227,62 @@ class BattleViewModel: ObservableObject {
 
         isPlayerTurn = false
         waitingForOpponent = true
+        stopTurnTimer()
 
+        if amPlayer1 {
+            // Host: resolve action locally and push
+            resolveOnlineAction(action)
+        } else {
+            // Non-host: write pending action for host to resolve
+            Task {
+                try? await battleService.setPlayerAction(
+                    battleId: battleId,
+                    isPlayer1: false,
+                    action: action
+                )
+            }
+        }
+    }
+
+    /// Host resolves an action (either its own or the opponent's) and pushes result
+    private func resolveOnlineAction(_ action: BattleAction) {
+        guard var battle = currentBattle, !battle.isOver else { return }
+
+        isResolvingTurn = true
+        let oldLog = battle.battleLog.count
+
+        BattleEngine.executeAction(battle: &battle, action: action)
+        battle.pendingAction = nil
+
+        currentBattle = battle
+
+        let newMessages = friendlyLog(Array(battle.battleLog.dropFirst(oldLog)))
+        lastAppliedLogCount = battle.battleLog.count
+
+        animateLogMessages(newMessages) {
+            if battle.isOver {
+                self.battlePhase = .finished
+                self.playerWon = battle.winnerId == self.playerId
+                self.showBattleResult = true
+                self.waitingForOpponent = false
+                self.stopTurnTimer()
+            } else {
+                // Check if it's now our turn
+                let isMyTurn = battle.activePlayerId == self.playerId
+                self.isPlayerTurn = isMyTurn
+                self.waitingForOpponent = !isMyTurn
+                if isMyTurn {
+                    self.startTurnTimer()
+                }
+            }
+        }
+
+        // Push updated battle to Firebase
         Task {
-            try? await battleService.setPlayerAction(
-                battleId: battleId,
-                isPlayer1: amPlayer1,
-                action: action
-            )
+            try? await battleService.createBattle(battle)
+            await MainActor.run {
+                self.isResolvingTurn = false
+            }
         }
     }
 
@@ -186,7 +310,7 @@ class BattleViewModel: ObservableObject {
                 var team = selectedTeam
                 for i in team.indices { team[i].heal() }
 
-                // Clean up any stale queue entry AND stale battle from a previous session
+                // Clean up any stale queue entry from a previous session
                 try? await battleService.leaveQueue(playerId: pid)
 
                 // Join queue FIRST so our entry is written before we start observing
@@ -284,16 +408,20 @@ class BattleViewModel: ObservableObject {
                     player2Team: oppTeam,
                     id: onlineBattleId!
                 )
+                // Player1 (host) goes first
+                battle.activePlayerId = sortedIds[0]
                 battle.addLog("Match found!")
                 battle.addLog("\(sortedIds[0]) sent out \(myTeam[0].name)!")
                 battle.addLog("\(sortedIds[1]) sent out \(oppTeam[0].name)!")
 
-                // Set battle state immediately from in-memory data (avoids Firebase roundtrip mangling)
+                // Set battle state immediately
                 currentBattle = battle
                 battlePhase = .fighting
-                isPlayerTurn = true
+                isPlayerTurn = true // Host goes first
+                waitingForOpponent = false
                 lastLogMessages = friendlyLog(battle.battleLog)
                 lastAppliedLogCount = battle.battleLog.count
+                startTurnTimer()
                 print("[Match] Host battle set directly: p1=\(myTeam.map{$0.name}) p2=\(oppTeam.map{$0.name})")
 
                 try? await battleService.createBattle(battle)
@@ -324,7 +452,6 @@ class BattleViewModel: ObservableObject {
         var displayBattle = amPlayer1 ? remoteBattle : swapPerspective(remoteBattle)
 
         // Host: update opponent team from non-host's team confirmation
-        // This fixes race conditions where stale queue data was fetched
         if amPlayer1, let teamJSON = remoteBattle.player2TeamJSON,
            let teamData = teamJSON.data(using: .utf8),
            let confirmedTeam = try? JSONDecoder().decode([Creature].self, from: teamData) {
@@ -345,7 +472,6 @@ class BattleViewModel: ObservableObject {
 
         // Initial battle load — transition to fighting
         if battlePhase != .fighting && battlePhase != .finished && remoteBattle.status == .active {
-            // For non-host: replace our team with local selectedTeam to avoid Firebase mangling
             if !amPlayer1 {
                 var myTeam = selectedTeam
                 for i in myTeam.indices { myTeam[i].heal() }
@@ -353,7 +479,7 @@ class BattleViewModel: ObservableObject {
                 print("[Match] Non-host using local team: \(myTeam.map{$0.name})")
                 print("[Match] Non-host opponent team: \(displayBattle.player2Team.map{$0.name})")
 
-                // Confirm our actual team to the host (prevents stale queue data issues)
+                // Confirm our actual team to the host
                 if let battleId = onlineBattleId {
                     if let teamData = try? JSONEncoder().encode(myTeam),
                        let teamJSON = String(data: teamData, encoding: .utf8) {
@@ -365,87 +491,90 @@ class BattleViewModel: ObservableObject {
             }
             currentBattle = displayBattle
             battlePhase = .fighting
-            isPlayerTurn = true
-            waitingForOpponent = false
             lastLogMessages = friendlyLog(displayBattle.battleLog)
             lastAppliedLogCount = displayBattle.battleLog.count
+
+            // Determine whose turn it is
+            let isMyTurn = remoteBattle.activePlayerId == playerId
+            isPlayerTurn = isMyTurn
+            waitingForOpponent = !isMyTurn
+            if isMyTurn {
+                startTurnTimer()
+            }
             return
         }
 
-        // Host: check if both actions are submitted → resolve turn
+        // Host: check if opponent submitted a pending action
         if amPlayer1 && !isResolvingTurn {
-            let p1 = remoteBattle.player1Action
-            let p2 = remoteBattle.player2Action
-            let hasForfeit = p1?.type == .forfeit || p2?.type == .forfeit
-            let bothReady = p1 != nil && p2 != nil
+            // Check for opponent's action (player2Action in raw battle)
+            if let opponentAction = remoteBattle.pendingAction,
+               remoteBattle.activePlayerId == remoteBattle.player2Id {
+                // Opponent submitted their action, resolve it
+                resolveOnlineAction(opponentAction)
+                return
+            }
 
-            if hasForfeit || bothReady {
-                isResolvingTurn = true
-                // Use LOCAL currentBattle (correct creature data) instead of remoteBattle
-                guard var mutable = currentBattle else {
-                    isResolvingTurn = false
-                    return
+        }
+
+        // Non-host: apply state updates from host's resolution
+        if !amPlayer1 {
+            let newLogCount = displayBattle.battleLog.count
+            if newLogCount > lastAppliedLogCount {
+                let newMessages = friendlyLog(Array(displayBattle.battleLog.dropFirst(lastAppliedLogCount)))
+                lastAppliedLogCount = newLogCount
+
+                // Merge remote changes into local battle
+                if var local = currentBattle {
+                    for i in local.player1Team.indices {
+                        if i < displayBattle.player1Team.indices.upperBound {
+                            local.player1Team[i].stats.hp = displayBattle.player1Team[i].stats.hp
+                        }
+                    }
+                    for i in local.player2Team.indices {
+                        if i < displayBattle.player2Team.indices.upperBound {
+                            local.player2Team[i].stats.hp = displayBattle.player2Team[i].stats.hp
+                        }
+                    }
+                    local.player1ActiveIndex = displayBattle.player1ActiveIndex
+                    local.player2ActiveIndex = displayBattle.player2ActiveIndex
+                    local.battleLog = displayBattle.battleLog
+                    local.status = displayBattle.status
+                    local.winnerId = displayBattle.winnerId
+                    local.currentTurn = displayBattle.currentTurn
+                    local.activePlayerId = displayBattle.activePlayerId
+                    local.pendingAction = nil
+                    currentBattle = local
+                } else {
+                    currentBattle = displayBattle
                 }
-                let action1 = p1 ?? .useMove(0)
-                let action2 = p2 ?? .useMove(0)
-                mutable.player1Action = nil
-                mutable.player2Action = nil
 
-                BattleEngine.resolveTurn(battle: &mutable, player1Action: action1, player2Action: action2)
-                currentBattle = mutable
-
-                Task {
-                    try? await battleService.createBattle(mutable)
-                    await MainActor.run {
-                        self.isResolvingTurn = false
+                animateLogMessages(newMessages) {
+                    if displayBattle.isOver {
+                        self.battlePhase = .finished
+                        self.playerWon = remoteBattle.winnerId == self.playerId
+                        self.showBattleResult = true
+                        self.waitingForOpponent = false
+                        self.stopTurnTimer()
+                    } else {
+                        // Check whose turn it is now
+                        let isMyTurn = remoteBattle.activePlayerId == self.playerId
+                        self.isPlayerTurn = isMyTurn
+                        self.waitingForOpponent = !isMyTurn
+                        if isMyTurn {
+                            self.startTurnTimer()
+                        } else {
+                            self.stopTurnTimer()
+                        }
                     }
                 }
-                return
             }
         }
 
-        // Apply state updates (new log messages from resolved turn)
-        let newLogCount = displayBattle.battleLog.count
-        if newLogCount > lastAppliedLogCount {
-            let newMessages = friendlyLog(Array(displayBattle.battleLog.dropFirst(lastAppliedLogCount)))
-            lastAppliedLogCount = newLogCount
-
-            // Merge remote changes into local battle to preserve correct creature data
-            if var local = currentBattle {
-                // Update HP and active index from remote (these change during battle)
-                for i in local.player1Team.indices {
-                    if i < displayBattle.player1Team.indices.upperBound {
-                        local.player1Team[i].stats.hp = displayBattle.player1Team[i].stats.hp
-                    }
-                }
-                for i in local.player2Team.indices {
-                    if i < displayBattle.player2Team.indices.upperBound {
-                        local.player2Team[i].stats.hp = displayBattle.player2Team[i].stats.hp
-                    }
-                }
-                local.player1ActiveIndex = displayBattle.player1ActiveIndex
-                local.player2ActiveIndex = displayBattle.player2ActiveIndex
-                local.battleLog = displayBattle.battleLog
-                local.status = displayBattle.status
-                local.winnerId = displayBattle.winnerId
-                local.currentTurn = displayBattle.currentTurn
-                local.player1Action = nil
-                local.player2Action = nil
-                currentBattle = local
-            } else {
-                currentBattle = displayBattle
-            }
-
-            animateLogMessages(newMessages) {
-                if displayBattle.isOver {
-                    self.battlePhase = .finished
-                    self.playerWon = remoteBattle.winnerId == self.playerId
-                    self.showBattleResult = true
-                    self.waitingForOpponent = false
-                } else {
-                    self.isPlayerTurn = true
-                    self.waitingForOpponent = false
-                }
+        // Host: also handle state updates for log sync
+        if amPlayer1 {
+            let newLogCount = displayBattle.battleLog.count
+            if newLogCount > lastAppliedLogCount && !isResolvingTurn {
+                lastAppliedLogCount = newLogCount
             }
         }
     }
@@ -460,8 +589,7 @@ class BattleViewModel: ObservableObject {
         swapped.player2Team = battle.player1Team
         swapped.player1ActiveIndex = battle.player2ActiveIndex
         swapped.player2ActiveIndex = battle.player1ActiveIndex
-        swapped.player1Action = battle.player2Action
-        swapped.player2Action = battle.player1Action
+        // Don't swap activePlayerId — it stays as the raw ID
         return swapped
     }
 
@@ -491,6 +619,7 @@ class BattleViewModel: ObservableObject {
             }
         }
 
+        stopTurnTimer()
         currentBattle = nil
         selectedTeam = []
         battlePhase = .setup
@@ -504,6 +633,7 @@ class BattleViewModel: ObservableObject {
         lastAppliedLogCount = 0
         isResolvingTurn = false
         amPlayer1 = true
+        turnSecondsRemaining = Self.turnTimeLimit
         cancelMatchmaking()
     }
 

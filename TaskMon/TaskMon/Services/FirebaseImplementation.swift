@@ -215,8 +215,8 @@ class FirebaseRealtimeBattleService: RealtimeBattleServiceProtocol {
     func setPlayerAction(battleId: String, isPlayer1: Bool, action: BattleAction) async throws {
         let data = try JSONEncoder().encode(action)
         let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
-        let field = isPlayer1 ? "player1Action" : "player2Action"
-        try await rtdb.child("battles").child(battleId).child(field).setValue(dict)
+        // Write to pendingAction so the host can pick it up from the Battle model
+        try await rtdb.child("battles").child(battleId).child("pendingAction").setValue(dict)
     }
 
     func joinQueue(playerId: String, team: [Creature]) async throws {

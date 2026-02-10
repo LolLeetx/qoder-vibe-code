@@ -1,68 +1,53 @@
 import Foundation
 
 class BattleEngine {
-    /// Resolve a single turn given both players' actions
-    static func resolveTurn(battle: inout Battle, player1Action: BattleAction, player2Action: BattleAction) {
-        battle.currentTurn += 1
+    /// Resolve a single player's action (alternating turn system)
+    static func executeAction(battle: inout Battle, action: BattleAction) {
+        let isPlayer1Acting = battle.isPlayer1Turn
 
-        // Handle forfeits
-        if player1Action.type == .forfeit {
-            battle.addLog("\(battle.player1Id) forfeited!")
-            battle.winnerId = battle.player2Id
-            battle.status = .finished
-            return
-        }
-        if player2Action.type == .forfeit {
-            battle.addLog("\(battle.player2Id) forfeited!")
-            battle.winnerId = battle.player1Id
+        // Handle forfeit
+        if action.type == .forfeit {
+            let forfeiterId = isPlayer1Acting ? battle.player1Id : battle.player2Id
+            let winnerId = isPlayer1Acting ? battle.player2Id : battle.player1Id
+            battle.addLog("\(forfeiterId) forfeited!")
+            battle.winnerId = winnerId
             battle.status = .finished
             return
         }
 
-        // Handle switches first
-        if player1Action.type == .switchCreature {
-            let idx = player1Action.index
-            if idx >= 0 && idx < battle.player1Team.count && !battle.player1Team[idx].isFainted {
-                battle.player1ActiveIndex = idx
-                battle.addLog("\(battle.player1Id) sent out \(battle.player1Team[idx].name)!")
+        // Handle switch
+        if action.type == .switchCreature {
+            let idx = action.index
+            if isPlayer1Acting {
+                if idx >= 0 && idx < battle.player1Team.count && !battle.player1Team[idx].isFainted {
+                    battle.player1ActiveIndex = idx
+                    battle.addLog("\(battle.player1Id) sent out \(battle.player1Team[idx].name)!")
+                }
+            } else {
+                if idx >= 0 && idx < battle.player2Team.count && !battle.player2Team[idx].isFainted {
+                    battle.player2ActiveIndex = idx
+                    battle.addLog("\(battle.player2Id) sent out \(battle.player2Team[idx].name)!")
+                }
             }
-        }
-        if player2Action.type == .switchCreature {
-            let idx = player2Action.index
-            if idx >= 0 && idx < battle.player2Team.count && !battle.player2Team[idx].isFainted {
-                battle.player2ActiveIndex = idx
-                battle.addLog("\(battle.player2Id) sent out \(battle.player2Team[idx].name)!")
-            }
-        }
-
-        // Resolve moves - faster creature goes first
-        let p1Speed = battle.player1Active.stats.speed
-        let p2Speed = battle.player2Active.stats.speed
-        let p1GoesFirst = p1Speed > p2Speed || (p1Speed == p2Speed && Bool.random())
-
-        if p1GoesFirst {
-            if player1Action.type == .useMove {
-                executeMove(battle: &battle, attackerIsPlayer1: true, moveIndex: player1Action.index)
-            }
-            // Check if p2 active fainted
-            if !battle.player2Active.isFainted && player2Action.type == .useMove {
-                executeMove(battle: &battle, attackerIsPlayer1: false, moveIndex: player2Action.index)
-            }
-        } else {
-            if player2Action.type == .useMove {
-                executeMove(battle: &battle, attackerIsPlayer1: false, moveIndex: player2Action.index)
-            }
-            if !battle.player1Active.isFainted && player1Action.type == .useMove {
-                executeMove(battle: &battle, attackerIsPlayer1: true, moveIndex: player1Action.index)
-            }
+            battle.switchTurn()
+            return
         }
 
-        // Check for fainting and auto-switch
-        handleFainting(battle: &battle, isPlayer1: true)
-        handleFainting(battle: &battle, isPlayer1: false)
+        // Handle move
+        if action.type == .useMove {
+            executeMove(battle: &battle, attackerIsPlayer1: isPlayer1Acting, moveIndex: action.index)
 
-        // Check win condition
-        checkWinCondition(battle: &battle)
+            // Check for fainting on the defender side
+            handleFainting(battle: &battle, isPlayer1: !isPlayer1Acting)
+
+            // Check win condition
+            checkWinCondition(battle: &battle)
+
+            // If battle isn't over, switch turn
+            if !battle.isOver {
+                battle.switchTurn()
+            }
+        }
     }
 
     private static func executeMove(battle: inout Battle, attackerIsPlayer1: Bool, moveIndex: Int) {

@@ -14,8 +14,26 @@ struct BattleArenaView: View {
                 // VS divider
                 HStack {
                     Rectangle().fill(PixelColors.cardBorder).frame(height: 1)
-                    PixelText(text: "VS", size: 14, color: PixelColors.danger)
-                        .padding(.horizontal, 8)
+                    VStack(spacing: 2) {
+                        PixelText(text: "VS", size: 14, color: PixelColors.danger)
+                        // Turn indicator + timer
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(battleVM.isPlayerTurn ? PixelColors.success : PixelColors.danger)
+                                .frame(width: 6, height: 6)
+                            PixelText(
+                                text: battleVM.isPlayerTurn ? "YOUR TURN" : "OPPONENT'S TURN",
+                                size: 9,
+                                color: battleVM.isPlayerTurn ? PixelColors.success : PixelColors.danger
+                            )
+                            PixelText(
+                                text: "\(battleVM.turnSecondsRemaining)s",
+                                size: 9,
+                                color: battleVM.turnSecondsRemaining <= 10 ? PixelColors.danger : .gray
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 8)
                     Rectangle().fill(PixelColors.cardBorder).frame(height: 1)
                 }
                 .padding(.vertical, 4)
@@ -157,7 +175,7 @@ struct BattleArenaView: View {
                     ProgressView()
                         .tint(.white)
                     PixelText(
-                        text: battleVM.waitingForOpponent ? "Waiting for opponent..." : "Opponent's turn...",
+                        text: "Opponent's turn... (\(battleVM.turnSecondsRemaining)s)",
                         size: 12,
                         color: .gray
                     )

@@ -41,8 +41,8 @@ struct Battle: Identifiable, Codable {
     var battleLog: [String]
     var status: BattleStatus
     var winnerId: String?
-    var player1Action: BattleAction?
-    var player2Action: BattleAction?
+    var activePlayerId: String  // whose turn it is
+    var pendingAction: BattleAction?  // action submitted by active player
     var player2TeamJSON: String?
 
     var player1Active: Creature { player1Team[player1ActiveIndex] }
@@ -59,11 +59,20 @@ struct Battle: Identifiable, Codable {
         self.currentTurn = 1
         self.battleLog = ["Battle Start!"]
         self.status = .active
+        // Player 1 goes first
+        self.activePlayerId = player1Id
     }
 
     var isOver: Bool { status == .finished }
 
+    var isPlayer1Turn: Bool { activePlayerId == player1Id }
+
     mutating func addLog(_ message: String) {
         battleLog.append(message)
+    }
+
+    mutating func switchTurn() {
+        activePlayerId = isPlayer1Turn ? player2Id : player1Id
+        currentTurn += 1
     }
 }
