@@ -13,9 +13,13 @@ class XPManager: ObservableObject {
     @Published var categoryXP: [TaskCategory: Int] = [:]
     let eventPublisher = PassthroughSubject<XPEvent, Never>()
 
-    private let storageKey = "categoryXP"
+    private var storageKey = "categoryXP"
 
-    init() {
+    init() {}
+
+    func setUser(_ userId: String) {
+        storageKey = "categoryXP_\(userId)"
+        categoryXP = [:]
         loadXP()
     }
 

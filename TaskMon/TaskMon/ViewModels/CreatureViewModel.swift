@@ -9,12 +9,16 @@ class CreatureViewModel: ObservableObject {
     @Published var newCreatureEvent: String?
 
     private var cancellables = Set<AnyCancellable>()
-    private let storageKey = "creatures"
+    private var storageKey = "creatures"
     private let xpManager = XPManager.shared
 
     init() {
-        loadCreatures()
         subscribeToXPEvents()
+    }
+
+    func setUser(_ userId: String) {
+        storageKey = "creatures_\(userId)"
+        loadCreatures()
     }
 
     func linkTaskVM(_ taskVM: TaskViewModel) {

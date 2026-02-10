@@ -18,6 +18,8 @@ struct TaskMonApp: App {
     @StateObject private var creatureVM = CreatureViewModel()
     @StateObject private var battleVM = BattleViewModel()
 
+    init() {}
+
     var body: some Scene {
         WindowGroup {
             Group {
@@ -37,6 +39,13 @@ struct TaskMonApp: App {
             }
             .preferredColorScheme(.dark)
             .animation(.easeInOut(duration: 0.3), value: authVM.isSignedIn)
+            .onAppear {
+                authVM.onSignIn = { [weak taskVM, weak creatureVM] userId in
+                    taskVM?.setUser(userId)
+                    creatureVM?.setUser(userId)
+                    XPManager.shared.setUser(userId)
+                }
+            }
         }
     }
 }

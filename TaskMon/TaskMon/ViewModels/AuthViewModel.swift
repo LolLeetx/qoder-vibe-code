@@ -9,6 +9,9 @@ class AuthViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var currentPlayer: Player?
 
+    /// Called after successful sign-in with the user's ID so other ViewModels can load user-scoped data
+    var onSignIn: ((String) -> Void)?
+
     private let authService = ServiceContainer.shared.auth
     private let dbService = ServiceContainer.shared.database
 
@@ -16,7 +19,10 @@ class AuthViewModel: ObservableObject {
         // Check if already signed in from a previous session
         if let uid = authService.currentUserId, authService.isAuthenticated {
             isSignedIn = true
-            Task { await loadPlayer(userId: uid) }
+            Task {
+                await loadPlayer(userId: uid)
+                onSignIn?(uid)
+            }
         }
     }
 
@@ -34,6 +40,7 @@ class AuthViewModel: ObservableObject {
             do {
                 let uid = try await authService.signInWithGoogle(presenting: rootVC)
                 await loadOrCreatePlayer(userId: uid)
+                onSignIn?(uid)
                 isSignedIn = true
             } catch {
                 errorMessage = error.localizedDescription
@@ -58,6 +65,7 @@ class AuthViewModel: ObservableObject {
                 )
                 currentPlayer = player
                 try await dbService.savePlayer(player)
+                onSignIn?(uid)
                 isSignedIn = true
             } catch {
                 errorMessage = error.localizedDescription

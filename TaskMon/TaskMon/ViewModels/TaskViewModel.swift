@@ -9,9 +9,12 @@ class TaskViewModel: ObservableObject {
     @Published var latestEvents: [XPEvent] = []
 
     let xpManager = XPManager.shared
-    private let storageKey = "tasks"
+    private var storageKey = "tasks"
 
-    init() {
+    init() {}
+
+    func setUser(_ userId: String) {
+        storageKey = "tasks_\(userId)"
         loadTasks()
     }
 
