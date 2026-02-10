@@ -45,6 +45,11 @@ struct TaskMonApp: App {
                     creatureVM?.setUser(userId)
                     XPManager.shared.setUser(userId)
                 }
+                authVM.onSignOut = { [weak taskVM, weak creatureVM] in
+                    taskVM?.clearData()
+                    creatureVM?.clearData()
+                    XPManager.shared.clearData()
+                }
             }
         }
     }

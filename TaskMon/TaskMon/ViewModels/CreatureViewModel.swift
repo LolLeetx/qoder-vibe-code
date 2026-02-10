@@ -21,6 +21,10 @@ class CreatureViewModel: ObservableObject {
         loadCreatures()
     }
 
+    func clearData() {
+        creatures = []
+    }
+
     func linkTaskVM(_ taskVM: TaskViewModel) {
         // Re-subscribe to pick up shared XPManager events
     }

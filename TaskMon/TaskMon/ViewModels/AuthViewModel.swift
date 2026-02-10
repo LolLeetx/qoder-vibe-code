@@ -11,6 +11,8 @@ class AuthViewModel: ObservableObject {
 
     /// Called after successful sign-in with the user's ID so other ViewModels can load user-scoped data
     var onSignIn: ((String) -> Void)?
+    /// Called on sign-out so other ViewModels can clear in-memory data
+    var onSignOut: (() -> Void)?
 
     private let authService = ServiceContainer.shared.auth
     private let dbService = ServiceContainer.shared.database
@@ -79,6 +81,7 @@ class AuthViewModel: ObservableObject {
             try authService.signOut()
             isSignedIn = false
             currentPlayer = nil
+            onSignOut?()
         } catch {
             errorMessage = error.localizedDescription
         }

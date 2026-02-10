@@ -23,6 +23,10 @@ class XPManager: ObservableObject {
         loadXP()
     }
 
+    func clearData() {
+        categoryXP = [:]
+    }
+
     func awardXP(amount: Int, to category: TaskCategory) -> [XPEvent] {
         let oldXP = categoryXP[category] ?? 0
         let newXP = oldXP + amount

@@ -18,6 +18,10 @@ class TaskViewModel: ObservableObject {
         loadTasks()
     }
 
+    func clearData() {
+        tasks = []
+    }
+
     // MARK: - CRUD
 
     func addTask(title: String, category: TaskCategory, difficulty: TaskDifficulty) {
