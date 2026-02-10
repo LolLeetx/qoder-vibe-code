@@ -28,18 +28,20 @@ class XPManager: ObservableObject {
         var events: [XPEvent] = []
         events.append(.xpGained(category: category, amount: amount, total: newXP))
 
-        // Check milestone crossings
-        let thresholds: [(Int, (TaskCategory) -> XPEvent)] = [
-            (GameConstants.stage1Threshold, { .creatureUnlocked(category: $0) }),
-            (GameConstants.stage2Threshold, { .creatureEvolved(category: $0, newStage: 2) }),
-            (GameConstants.stage3Threshold, { .creatureEvolved(category: $0, newStage: 3) })
-        ]
+        // Check for new creature spawn (every 100 XP spawns a new Stage 1 creature)
+        let spawnInterval = GameConstants.stage1Threshold
+        let oldSpawns = max(0, oldXP / spawnInterval)
+        let newSpawns = max(0, newXP / spawnInterval)
+        for _ in 0..<(newSpawns - oldSpawns) {
+            events.append(.creatureUnlocked(category: category))
+        }
 
-        for (threshold, eventMaker) in thresholds {
-            if oldXP < threshold && newXP >= threshold {
-                let event = eventMaker(category)
-                events.append(event)
-            }
+        // Check evolution thresholds (evolves one existing creature)
+        if oldXP < GameConstants.stage2Threshold && newXP >= GameConstants.stage2Threshold {
+            events.append(.creatureEvolved(category: category, newStage: 2))
+        }
+        if oldXP < GameConstants.stage3Threshold && newXP >= GameConstants.stage3Threshold {
+            events.append(.creatureEvolved(category: category, newStage: 3))
         }
 
         for event in events {

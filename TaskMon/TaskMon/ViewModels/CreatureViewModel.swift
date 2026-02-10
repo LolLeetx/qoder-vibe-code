@@ -33,31 +33,54 @@ class CreatureViewModel: ObservableObject {
     private func handleEvent(_ event: XPEvent) {
         switch event {
         case .creatureUnlocked(let category):
-            // Directly create a Stage 1 creature if we don't have one for this category
-            if !creatures.contains(where: { $0.category == category }) {
-                var creature = Creature(category: category, stage: 1)
-                creature.currentXP = xpManager.xp(for: category)
-                creatures.append(creature)
-                evolvingCreature = creature
-                showEvolution = true
-                saveCreatures()
-            }
+            // Create a new Stage 1 creature (allows multiples per category)
+            var creature = Creature(category: category, stage: 1)
+            creature.currentXP = xpManager.xp(for: category)
+            creatures.append(creature)
+            renumberCreatures()
+            evolvingCreature = creatures.last
+            showEvolution = true
+            saveCreatures()
 
         case .creatureEvolved(let category, let newStage):
-            // Find the creature for this category and evolve it
+            // Evolve the first creature of this category that is one stage below
             if let index = creatures.firstIndex(where: { $0.category == category && $0.stage == newStage - 1 }) {
                 creatures[index].evolve(to: newStage)
                 creatures[index].currentXP = xpManager.xp(for: category)
+                renumberCreatures()
                 evolvingCreature = creatures[index]
                 showEvolution = true
                 saveCreatures()
             }
 
         case .xpGained(let category, _, let total):
-            // Update XP on the creature
-            if let index = creatures.firstIndex(where: { $0.category == category }) {
-                creatures[index].currentXP = total
-                saveCreatures()
+            // Update XP on all creatures of this category
+            for i in creatures.indices where creatures[i].category == category {
+                creatures[i].currentXP = total
+            }
+            saveCreatures()
+        }
+    }
+
+    /// Renumber creatures that share the same base name (e.g. "Vitaleaf 1", "Vitaleaf 2")
+    private func renumberCreatures() {
+        // Group creature indices by their base name (derived from category + stage)
+        var nameGroups: [String: [Int]] = [:]
+        for (index, creature) in creatures.enumerated() {
+            let names = creature.category.creatureNames
+            let baseName = names[min(creature.stage - 1, names.count - 1)]
+            nameGroups[baseName, default: []].append(index)
+        }
+
+        for (baseName, indices) in nameGroups {
+            if indices.count == 1 {
+                // Only one creature with this name — no number needed
+                creatures[indices[0]].name = baseName
+            } else {
+                // Multiple creatures — number them
+                for (i, index) in indices.enumerated() {
+                    creatures[index].name = "\(baseName) \(i + 1)"
+                }
             }
         }
     }
