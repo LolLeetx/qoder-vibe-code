@@ -72,6 +72,18 @@ struct LoginView: View {
                     }
                     .disabled(authVM.isLoading)
 
+                    // Continue without sign in
+                    Button(action: {
+                        authVM.continueAsGuest()
+                    }) {
+                        Text("Continue without sign in")
+                            .font(.system(size: 14, weight: .medium, design: .monospaced))
+                            .foregroundColor(.gray)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                    }
+                    .disabled(authVM.isLoading)
+
                     if authVM.isLoading {
                         HStack(spacing: 8) {
                             ProgressView()

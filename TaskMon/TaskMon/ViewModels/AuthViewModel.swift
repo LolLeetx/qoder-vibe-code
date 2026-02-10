@@ -42,6 +42,30 @@ class AuthViewModel: ObservableObject {
         }
     }
 
+    func continueAsGuest() {
+        isLoading = true
+        errorMessage = nil
+
+        Task {
+            do {
+                let uid = try await authService.signInAnonymously()
+                let player = Player(
+                    id: uid,
+                    username: "Guest",
+                    displayName: "Guest",
+                    email: nil,
+                    photoURL: nil
+                )
+                currentPlayer = player
+                try await dbService.savePlayer(player)
+                isSignedIn = true
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            isLoading = false
+        }
+    }
+
     func signOut() {
         do {
             try authService.signOut()
