@@ -37,6 +37,7 @@ protocol RealtimeBattleServiceProtocol {
     func leaveQueue(playerId: String) async throws
     func observeQueue(onMatchFound: @escaping (String, String) -> Void) -> Any
     func fetchQueueEntry(playerId: String) async throws -> [Creature]?
+    func confirmPlayerTeam(battleId: String, isPlayer1: Bool, teamJSON: String) async throws
     func deleteBattle(battleId: String) async throws
     func removeObserver(_ handle: Any)
 }
@@ -145,6 +146,10 @@ class StubRealtimeBattleService: RealtimeBattleServiceProtocol {
 
     func fetchQueueEntry(playerId: String) async throws -> [Creature]? {
         return nil
+    }
+
+    func confirmPlayerTeam(battleId: String, isPlayer1: Bool, teamJSON: String) async throws {
+        // No-op for local
     }
 
     func deleteBattle(battleId: String) async throws {

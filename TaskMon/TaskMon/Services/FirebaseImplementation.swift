@@ -289,6 +289,11 @@ class FirebaseRealtimeBattleService: RealtimeBattleServiceProtocol {
         return nil
     }
 
+    func confirmPlayerTeam(battleId: String, isPlayer1: Bool, teamJSON: String) async throws {
+        let field = isPlayer1 ? "player1TeamJSON" : "player2TeamJSON"
+        try await rtdb.child("battles").child(battleId).child(field).setValue(teamJSON)
+    }
+
     func removeObserver(_ handle: Any) {
         if let h = handle as? UInt {
             rtdb.removeObserver(withHandle: h)

@@ -285,14 +285,14 @@ class BattleViewModel: ObservableObject {
                     id: onlineBattleId!
                 )
                 battle.addLog("Match found!")
-                battle.addLog("You sent out \(myTeam[0].name)!")
-                battle.addLog("Opponent sent out \(oppTeam[0].name)!")
+                battle.addLog("\(sortedIds[0]) sent out \(myTeam[0].name)!")
+                battle.addLog("\(sortedIds[1]) sent out \(oppTeam[0].name)!")
 
                 // Set battle state immediately from in-memory data (avoids Firebase roundtrip mangling)
                 currentBattle = battle
                 battlePhase = .fighting
                 isPlayerTurn = true
-                lastLogMessages = battle.battleLog
+                lastLogMessages = friendlyLog(battle.battleLog)
                 lastAppliedLogCount = battle.battleLog.count
                 print("[Match] Host battle set directly: p1=\(myTeam.map{$0.name}) p2=\(oppTeam.map{$0.name})")
 
@@ -323,6 +323,26 @@ class BattleViewModel: ObservableObject {
         // Swap perspective so player1 = "us" in local display
         var displayBattle = amPlayer1 ? remoteBattle : swapPerspective(remoteBattle)
 
+        // Host: update opponent team from non-host's team confirmation
+        // This fixes race conditions where stale queue data was fetched
+        if amPlayer1, let teamJSON = remoteBattle.player2TeamJSON,
+           let teamData = teamJSON.data(using: .utf8),
+           let confirmedTeam = try? JSONDecoder().decode([Creature].self, from: teamData) {
+            if var local = currentBattle, local.player2TeamJSON != teamJSON {
+                let currentNames = local.player2Team.map { $0.name }
+                let confirmedNames = confirmedTeam.map { $0.name }
+                if currentNames != confirmedNames {
+                    print("[Match] Host updating opponent team from confirmation: \(confirmedNames)")
+                }
+                var healedTeam = confirmedTeam
+                for i in healedTeam.indices { healedTeam[i].heal() }
+                local.player2Team = healedTeam
+                local.player2TeamJSON = teamJSON
+                currentBattle = local
+                displayBattle.player2Team = healedTeam
+            }
+        }
+
         // Initial battle load — transition to fighting
         if battlePhase != .fighting && battlePhase != .finished && remoteBattle.status == .active {
             // For non-host: replace our team with local selectedTeam to avoid Firebase mangling
@@ -332,6 +352,16 @@ class BattleViewModel: ObservableObject {
                 displayBattle.player1Team = myTeam
                 print("[Match] Non-host using local team: \(myTeam.map{$0.name})")
                 print("[Match] Non-host opponent team: \(displayBattle.player2Team.map{$0.name})")
+
+                // Confirm our actual team to the host (prevents stale queue data issues)
+                if let battleId = onlineBattleId {
+                    if let teamData = try? JSONEncoder().encode(myTeam),
+                       let teamJSON = String(data: teamData, encoding: .utf8) {
+                        Task {
+                            try? await self.battleService.confirmPlayerTeam(battleId: battleId, isPlayer1: false, teamJSON: teamJSON)
+                        }
+                    }
+                }
             }
             currentBattle = displayBattle
             battlePhase = .fighting

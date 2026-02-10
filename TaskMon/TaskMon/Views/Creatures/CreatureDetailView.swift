@@ -10,15 +10,15 @@ struct CreatureDetailView: View {
                 PixelColors.background.ignoresSafeArea()
 
                 ScrollView {
-                    VStack(spacing: 20) {
+                    VStack(spacing: 14) {
                         // Hero sprite
                         ZStack {
                             Circle()
                                 .fill(creature.category.color.opacity(0.1))
-                                .frame(width: 160, height: 160)
-                            CreatureSpriteView(creature: creature, size: 120)
+                                .frame(width: 120, height: 120)
+                            CreatureSpriteView(creature: creature, size: 90)
                         }
-                        .padding(.top, 20)
+                        .padding(.top, 8)
 
                         // Name + type
                         VStack(spacing: 6) {

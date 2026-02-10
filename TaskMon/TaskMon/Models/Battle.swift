@@ -43,6 +43,7 @@ struct Battle: Identifiable, Codable {
     var winnerId: String?
     var player1Action: BattleAction?
     var player2Action: BattleAction?
+    var player2TeamJSON: String?
 
     var player1Active: Creature { player1Team[player1ActiveIndex] }
     var player2Active: Creature { player2Team[player2ActiveIndex] }
