@@ -186,19 +186,20 @@ class BattleViewModel: ObservableObject {
                 var team = selectedTeam
                 for i in team.indices { team[i].heal() }
 
-                // Clean up any stale queue entry from a previous session
+                // Clean up any stale queue entry AND stale battle from a previous session
                 try? await battleService.leaveQueue(playerId: pid)
 
-                // Observe queue FIRST to avoid race conditions
+                // Join queue FIRST so our entry is written before we start observing
+                try await battleService.joinQueue(playerId: pid, team: team)
+                print("[Matchmaking] Joined queue as \(pid) with team: \(team.map { $0.name })")
+
+                // Now observe — our fresh entry is already in place
                 self.queueObserverHandle = battleService.observeQueue { [weak self] player1Id, player2Id in
                     guard let self else { return }
                     DispatchQueue.main.async {
                         self.handleMatchFound(player1Id: player1Id, player2Id: player2Id)
                     }
                 }
-
-                try await battleService.joinQueue(playerId: pid, team: team)
-                print("[Matchmaking] Joined queue as \(pid) with team: \(team.map { $0.name })")
             } catch {
                 print("Matchmaking error: \(error)")
                 self.cancelMatchmaking()
@@ -378,7 +379,32 @@ class BattleViewModel: ObservableObject {
         if newLogCount > lastAppliedLogCount {
             let newMessages = friendlyLog(Array(displayBattle.battleLog.dropFirst(lastAppliedLogCount)))
             lastAppliedLogCount = newLogCount
-            currentBattle = displayBattle
+
+            // Merge remote changes into local battle to preserve correct creature data
+            if var local = currentBattle {
+                // Update HP and active index from remote (these change during battle)
+                for i in local.player1Team.indices {
+                    if i < displayBattle.player1Team.indices.upperBound {
+                        local.player1Team[i].stats.hp = displayBattle.player1Team[i].stats.hp
+                    }
+                }
+                for i in local.player2Team.indices {
+                    if i < displayBattle.player2Team.indices.upperBound {
+                        local.player2Team[i].stats.hp = displayBattle.player2Team[i].stats.hp
+                    }
+                }
+                local.player1ActiveIndex = displayBattle.player1ActiveIndex
+                local.player2ActiveIndex = displayBattle.player2ActiveIndex
+                local.battleLog = displayBattle.battleLog
+                local.status = displayBattle.status
+                local.winnerId = displayBattle.winnerId
+                local.currentTurn = displayBattle.currentTurn
+                local.player1Action = nil
+                local.player2Action = nil
+                currentBattle = local
+            } else {
+                currentBattle = displayBattle
+            }
 
             animateLogMessages(newMessages) {
                 if displayBattle.isOver {

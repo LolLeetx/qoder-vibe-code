@@ -240,9 +240,20 @@ class FirebaseRealtimeBattleService: RealtimeBattleServiceProtocol {
             guard let children = snapshot.children.allObjects as? [DataSnapshot],
                   children.count >= 2 else { return }
 
-            // Simple matchmaking: match first two players
-            let player1Id = children[0].key
-            let player2Id = children[1].key
+            // Only match entries that have teamJSON (fresh format) and recent timestamps
+            let now = Date().timeIntervalSince1970 * 1000 // milliseconds
+            let freshEntries = children.filter { child in
+                guard let data = child.value as? [String: Any] else { return false }
+                // Must have teamJSON (new format entries only)
+                guard data["teamJSON"] is String else { return false }
+                // Must be recent (within last 2 minutes)
+                if let ts = data["timestamp"] as? Double, now - ts > 120_000 { return false }
+                return true
+            }
+
+            guard freshEntries.count >= 2 else { return }
+            let player1Id = freshEntries[0].key
+            let player2Id = freshEntries[1].key
             onMatchFound(player1Id, player2Id)
         }
         return handle
